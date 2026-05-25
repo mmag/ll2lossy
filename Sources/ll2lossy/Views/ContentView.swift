@@ -8,7 +8,7 @@ struct ContentView: View {
 
     @State private var leftRoot:  FileItem?
     @State private var rightRoot: FileItem?
-    @State private var leftSelection: Set<UUID> = []
+    @State private var leftSelection: Set<URL> = []
     @State private var showProgress  = false
     @State private var showSettings  = false
     @State private var ffmpegMissing = false
@@ -51,7 +51,6 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Main two-panel area
             HStack(spacing: 0) {
                 FileBrowserView(
                     title: "Источник",
@@ -77,11 +76,9 @@ struct ContentView: View {
             }
             .padding(10)
 
-            // Status bar
             Divider()
             statusBar
 
-            // Progress drawer
             if showProgress {
                 Divider()
                 ProgressDrawerView(engine: engine)
@@ -121,7 +118,7 @@ struct ContentView: View {
         }
     }
 
-    // MARK: – Center strip with convert button
+    // MARK: – Center strip
 
     private var centerStrip: some View {
         VStack {
@@ -148,11 +145,12 @@ struct ContentView: View {
     private func convertSelected() {
         guard FFmpegLocator.locate() != nil else { ffmpegMissing = true; return }
         guard let sourceRoot = leftRoot, let destRoot = rightRoot else { return }
-        let items = collectSelectedFiles(root: sourceRoot)
-        guard !items.isEmpty else { return }
+        guard !leftSelection.isEmpty else { return }
         showProgress = true
-        engine.enqueue(sources: items, sourceRoot: sourceRoot.url,
-                       destinationRoot: destRoot.url, settings: settings)
+        engine.enqueue(sources: Array(leftSelection),
+                       sourceRoot: sourceRoot.url,
+                       destinationRoot: destRoot.url,
+                       settings: settings)
     }
 
     private func startConversion(sources: [FileItem]) {
@@ -162,27 +160,15 @@ struct ContentView: View {
             ?? sources.first?.url.deletingLastPathComponent()
             ?? destRoot.url
         showProgress = true
-        engine.enqueue(sources: sources, sourceRoot: sourceRoot,
-                       destinationRoot: destRoot.url, settings: settings)
+        engine.enqueue(sources: sources.map { $0.url },
+                       sourceRoot: sourceRoot,
+                       destinationRoot: destRoot.url,
+                       settings: settings)
     }
 
     private func navigateRight(to folder: FileItem) {
         settings.rightPath = folder.url.path
         folder.loadChildren(losslessOnly: false)
         rightRoot = folder
-    }
-
-    /// Collects all lossless FileItems whose IDs are in leftSelection.
-    private func collectSelectedFiles(root: FileItem) -> [FileItem] {
-        var result: [FileItem] = []
-        func traverse(_ item: FileItem) {
-            if !item.isDirectory && item.isLossless && leftSelection.contains(item.id) {
-                result.append(item)
-                return
-            }
-            item.children?.forEach { traverse($0) }
-        }
-        root.children?.forEach { traverse($0) }
-        return result
     }
 }

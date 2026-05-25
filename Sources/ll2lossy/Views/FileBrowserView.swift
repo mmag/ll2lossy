@@ -7,7 +7,7 @@ struct FileBrowserView: View {
     let losslessOnly: Bool
     @Binding var path: String
     @Binding var root: FileItem?
-    @Binding var selection: Set<UUID>
+    @Binding var selection: Set<URL>
 
     var onConvertDrop: (([FileItem]) -> Void)?
     var onNavigateToFolder: ((FileItem) -> Void)?

@@ -3,42 +3,60 @@ import AppKit
 
 enum CheckboxState { case unchecked, mixed, checked }
 
-// MARK: – Checkbox helpers (MainActor free functions)
+// MARK: – Checkbox helpers
 
+/// Returns true if `url` itself or any ancestor is in the selection.
 @MainActor
-func losslessDescendantIDs(of item: FileItem) -> [UUID] {
-    if !item.isDirectory { return item.isLossless ? [item.id] : [] }
-    return item.children?.flatMap { losslessDescendantIDs(of: $0) } ?? []
-}
-
-@MainActor
-func checkboxState(of item: FileItem, in selection: Set<UUID>) -> CheckboxState {
-    if !item.isDirectory {
-        return selection.contains(item.id) ? .checked : .unchecked
+private func isCovered(_ url: URL, by selection: Set<URL>) -> Bool {
+    if selection.contains(url) { return true }
+    var current = url.deletingLastPathComponent()
+    while current.pathComponents.count > 1 {
+        if selection.contains(current) { return true }
+        let parent = current.deletingLastPathComponent()
+        if parent == current { break }
+        current = parent
     }
-    let ids = losslessDescendantIDs(of: item)
-    if ids.isEmpty { return .unchecked }
-    let n = ids.filter { selection.contains($0) }.count
-    if n == 0           { return .unchecked }
-    if n == ids.count   { return .checked   }
-    return .mixed
+    return false
 }
 
 @MainActor
-func toggleCheckbox(item: FileItem, selection: Binding<Set<UUID>>) {
-    if !item.isDirectory {
-        if selection.wrappedValue.contains(item.id) {
-            selection.wrappedValue.remove(item.id)
-        } else if item.isLossless {
-            selection.wrappedValue.insert(item.id)
+func checkboxState(of item: FileItem, in selection: Set<URL>) -> CheckboxState {
+    if isCovered(item.url, by: selection) { return .checked }
+    guard item.isDirectory, let children = item.children, !children.isEmpty else {
+        return .unchecked
+    }
+    var hasChecked = false
+    var hasUnchecked = false
+    for child in children {
+        switch checkboxState(of: child, in: selection) {
+        case .checked:   hasChecked = true
+        case .unchecked: hasUnchecked = true
+        case .mixed:     hasChecked = true; hasUnchecked = true
         }
-        return
+        if hasChecked && hasUnchecked { return .mixed }
     }
-    let ids = Set(losslessDescendantIDs(of: item))
-    if checkboxState(of: item, in: selection.wrappedValue) == .checked {
-        ids.forEach { selection.wrappedValue.remove($0) }
+    return hasChecked ? .checked : .unchecked
+}
+
+@MainActor
+func toggleCheckbox(item: FileItem, selection: Binding<Set<URL>>) {
+    let url = item.url
+    let urlPath = url.path
+    let state = checkboxState(of: item, in: selection.wrappedValue)
+
+    if state == .checked {
+        // Remove this URL and any ancestor or descendant that covers it
+        selection.wrappedValue = selection.wrappedValue.filter { existing in
+            if existing == url { return false }
+            if existing.path.hasPrefix(urlPath + "/") { return false }  // descendant
+            if urlPath.hasPrefix(existing.path + "/") { return false }  // ancestor
+            return true
+        }
     } else {
-        ids.forEach { selection.wrappedValue.insert($0) }
+        // Select: add URL, remove any descendants now covered by this
+        var s = selection.wrappedValue.filter { !$0.path.hasPrefix(urlPath + "/") }
+        s.insert(url)
+        selection.wrappedValue = s
     }
 }
 
@@ -47,7 +65,7 @@ func toggleCheckbox(item: FileItem, selection: Binding<Set<UUID>>) {
 @MainActor
 struct TreeNodeView: View {
     @ObservedObject var item: FileItem
-    @Binding var selection: Set<UUID>
+    @Binding var selection: Set<URL>
     let losslessOnly: Bool
     let showCheckbox: Bool
     let depth: Int
@@ -117,7 +135,6 @@ struct TreeNodeView: View {
 
     private func rowLabel(isDirectory: Bool) -> some View {
         HStack(spacing: 4) {
-            // Checkbox (source panel only)
             if showCheckbox && (isDirectory || item.isLossless) {
                 let state = checkboxState(of: item, in: selection)
                 Button {

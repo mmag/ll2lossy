@@ -10,7 +10,7 @@ final class TranscodeEngine: ObservableObject {
 
     // MARK: – Public API
 
-    func enqueue(sources: [FileItem], sourceRoot: URL, destinationRoot: URL, settings: AppSettings) {
+    func enqueue(sources: [URL], sourceRoot: URL, destinationRoot: URL, settings: AppSettings) {
         let newTasks = buildTasks(sources: sources, sourceRoot: sourceRoot,
                                   destinationRoot: destinationRoot, settings: settings)
         guard !newTasks.isEmpty else { return }
@@ -42,10 +42,10 @@ final class TranscodeEngine: ObservableObject {
 
     // MARK: – Task building
 
-    private func buildTasks(sources: [FileItem], sourceRoot: URL,
+    private func buildTasks(sources: [URL], sourceRoot: URL,
                             destinationRoot: URL, settings: AppSettings) -> [TranscodeTask] {
         sources
-            .flatMap { collectLosslessURLs(from: $0.url) }
+            .flatMap { collectLosslessURLs(from: $0) }
             .map { url in
                 TranscodeTask(
                     source: url,
@@ -149,6 +149,10 @@ final class TranscodeEngine: ObservableObject {
             task.setError(error.localizedDescription)
             return
         }
+        // Close parent's write ends so readers get EOF when the child process exits.
+        // Without this the pipe buffers stay open and bytes.lines never terminates.
+        stdoutPipe.fileHandleForWriting.closeFile()
+        stderrPipe.fileHandleForWriting.closeFile()
 
         // Shared duration found in stderr, used for progress from stdout
         let sharedDuration = SharedDuration()
