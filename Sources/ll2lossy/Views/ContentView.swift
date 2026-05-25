@@ -8,8 +8,9 @@ struct ContentView: View {
     @State private var leftRoot:  FileItem?
     @State private var rightRoot: FileItem?
     @State private var leftSelection: Set<UUID> = []
-    @State private var showProgress = false
-    @State private var showSettings = false
+    @State private var showProgress  = false
+    @State private var showSettings  = false
+    @State private var ffmpegMissing = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -79,11 +80,17 @@ struct ContentView: View {
             SettingsView()
                 .environmentObject(settings)
         }
+        .alert("ffmpeg не найден", isPresented: $ffmpegMissing) {
+            Button("OK") {}
+        } message: {
+            Text("Запустите в терминале:\n\n./setup.sh\n\nСкрипт скопирует ffmpeg из Homebrew. Если Homebrew не установлен: brew install ffmpeg")
+        }
     }
 
     // MARK: – Actions
 
     private func convertSelected() {
+        guard FFmpegLocator.locate() != nil else { ffmpegMissing = true; return }
         guard let sourceRoot = leftRoot, let destRoot = rightRoot else { return }
         let items = collectSelectedItems(root: sourceRoot, selection: leftSelection)
         guard !items.isEmpty else { return }
@@ -93,6 +100,7 @@ struct ContentView: View {
     }
 
     private func startConversion(sources: [FileItem]) {
+        guard FFmpegLocator.locate() != nil else { ffmpegMissing = true; return }
         guard let destRoot = rightRoot else { return }
         let sourceRoot = leftRoot?.url
             ?? sources.first?.url.deletingLastPathComponent()

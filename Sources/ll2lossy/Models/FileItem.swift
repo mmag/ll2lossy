@@ -13,14 +13,11 @@ final class FileItem: Identifiable, ObservableObject {
 
     var name: String { url.lastPathComponent }
 
-    var icon: NSImage {
-        NSWorkspace.shared.icon(forFile: url.path)
-    }
+    var icon: NSImage { NSWorkspace.shared.icon(forFile: url.path) }
 
     static let losslessExtensions: Set<String> = [
         "flac", "wav", "wave", "aiff", "aif", "alac", "ape", "wv", "wma", "dsf", "dff"
     ]
-    // m4a can be either ALAC or AAC; we include it and let ffprobe/ffmpeg handle it
     static let audioExtensions: Set<String> = losslessExtensions.union(["m4a"])
 
     init(url: URL) {
@@ -30,7 +27,6 @@ final class FileItem: Identifiable, ObservableObject {
         self.isDirectory = isDir.boolValue
         let ext = url.pathExtension.lowercased()
         self.isLossless = !isDir.boolValue && FileItem.audioExtensions.contains(ext)
-        // directories start with empty children array so tree shows disclosure arrow
         if isDir.boolValue { self.children = nil }
     }
 
@@ -41,45 +37,31 @@ final class FileItem: Identifiable, ObservableObject {
             at: url,
             includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
             options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else {
-            children = []
-            return
-        }
+        ) else { children = []; return }
 
         children = contents
             .map { FileItem(url: $0) }
-            .filter { item in
-                if losslessOnly { return item.isDirectory || item.isLossless }
-                return true
-            }
+            .filter { losslessOnly ? ($0.isDirectory || $0.isLossless) : true }
             .sorted {
                 if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
                 return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
             }
     }
+}
 
-    // Recursively collect all lossless files under this item
-    nonisolated func collectLosslessFiles() -> [FileItem] {
-        // Must be called from non-isolated context carefully;
-        // safe because we only read immutable properties (url, isDirectory, isLossless)
-        // and children snapshot at call time.
-        if !isDirectory { return isLossless ? [self] : [] }
-        // Load children synchronously on the calling thread (used from engine thread)
-        let fm = FileManager.default
-        var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue,
-              let contents = try? fm.contentsOfDirectory(
-                at: url,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles]
-              )
-        else { return [] }
-
-        let items = contents.map { FileItem(url: $0) }
-        var result: [FileItem] = []
-        for item in items {
-            result.append(contentsOf: item.collectLosslessFiles())
-        }
-        return result
+/// Recursively collects all lossless audio file URLs under the given URL.
+/// Free function — no actor isolation, safe to call from background tasks.
+func collectLosslessURLs(from url: URL) -> [URL] {
+    let extensions: Set<String> = [
+        "flac", "wav", "wave", "aiff", "aif", "alac", "ape", "wv", "wma", "dsf", "dff", "m4a"
+    ]
+    var isDir: ObjCBool = false
+    FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+    if !isDir.boolValue {
+        return extensions.contains(url.pathExtension.lowercased()) ? [url] : []
     }
+    guard let contents = try? FileManager.default.contentsOfDirectory(
+        at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+    ) else { return [] }
+    return contents.flatMap { collectLosslessURLs(from: $0) }
 }

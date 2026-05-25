@@ -1,13 +1,11 @@
 import Foundation
-import ffmpegkit
 
 @MainActor
 final class TranscodeEngine: ObservableObject {
     @Published private(set) var tasks: [TranscodeTask] = []
     @Published private(set) var isRunning = false
 
-    // sessionId → task.id, for cancel support
-    private var sessionMap: [Int: UUID] = [:]
+    private var processes: [UUID: Process] = [:]
     private var runningJob: Task<Void, Never>?
 
     // MARK: – Public API
@@ -27,34 +25,34 @@ final class TranscodeEngine: ObservableObject {
     }
 
     func cancelAll() {
-        FFmpegKit.cancel()
+        processes.values.forEach { $0.terminate() }
+        runningJob?.cancel()
         tasks.filter { $0.status == .running || $0.status == .pending }
             .forEach { $0.setStatus(.cancelled) }
-        runningJob?.cancel()
         isRunning = false
     }
 
     func cancel(id: UUID) {
-        if let sessionId = sessionMap.first(where: { $0.value == id })?.key {
-            FFmpegKit.cancel(sessionId)
-        }
+        processes[id]?.terminate()
     }
 
     func clearCompleted() {
-        tasks.removeAll { $0.status == .done || $0.status == .cancelled || $0.status == .error }
+        tasks.removeAll { $0.status != .running && $0.status != .pending }
     }
 
-    // MARK: – Private: task building
+    // MARK: – Task building
 
     private func buildTasks(sources: [FileItem], sourceRoot: URL,
                             destinationRoot: URL, settings: AppSettings) -> [TranscodeTask] {
-        sources.flatMap { $0.collectLosslessFiles() }.map { file in
-            TranscodeTask(
-                source: file.url,
-                destination: resolveDestination(source: file.url, sourceRoot: sourceRoot,
-                                                destinationRoot: destinationRoot, settings: settings)
-            )
-        }
+        sources
+            .flatMap { collectLosslessURLs(from: $0.url) }
+            .map { url in
+                TranscodeTask(
+                    source: url,
+                    destination: resolveDestination(source: url, sourceRoot: sourceRoot,
+                                                    destinationRoot: destinationRoot, settings: settings)
+                )
+            }
     }
 
     private func resolveDestination(source: URL, sourceRoot: URL,
@@ -82,13 +80,12 @@ final class TranscodeEngine: ObservableObject {
         return dest
     }
 
-    // MARK: – Private: execution
+    // MARK: – Execution
 
     private func runAll(_ allTasks: [TranscodeTask], parallelism: Int, settings: AppSettings) async {
         await withTaskGroup(of: Void.self) { group in
             var iter    = allTasks.makeIterator()
             var running = 0
-
             while running < parallelism, let task = iter.next() {
                 group.addTask { await self.runOne(task, settings: settings) }
                 running += 1
@@ -102,109 +99,126 @@ final class TranscodeEngine: ObservableObject {
     }
 
     private func runOne(_ task: TranscodeTask, settings: AppSettings) async {
-        // Skip / overwrite
+        guard let ffmpeg = FFmpegLocator.locate() else {
+            task.setError("ffmpeg не найден. Запустите ./setup.sh")
+            return
+        }
+
         let destExists = FileManager.default.fileExists(atPath: task.destinationURL.path)
         if destExists {
             switch settings.onConflict {
-            case .skip:
-                task.setStatus(.done)
-                return
-            case .overwrite:
-                try? FileManager.default.removeItem(at: task.destinationURL)
-            case .suffix:
-                break
+            case .skip:      task.setStatus(.done); return
+            case .overwrite: try? FileManager.default.removeItem(at: task.destinationURL)
+            case .suffix:    break
             }
         }
 
-        // Create destination directory
         try? FileManager.default.createDirectory(
             at: task.destinationURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
 
-        // Probe duration for progress
-        let duration = await probeDuration(url: task.sourceURL)
+        // Build arguments: use -progress pipe:1 for progress, stderr for duration
+        var args: [String] = ["-hide_banner", "-i", task.sourceURL.path, "-y",
+                               "-codec:a", "libmp3lame"]
+        if settings.encodingMode == .vbr {
+            args += ["-q:a", "\(settings.vbrQuality)"]
+        } else {
+            args += ["-b:a", "\(settings.cbrBitrate)k"]
+        }
+        if settings.preserveMetadata {
+            args += ["-map_metadata", "0", "-id3v2_version", "3"]
+        }
+        args += ["-progress", "pipe:1", "-nostats", task.destinationURL.path]
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: ffmpeg)
+        process.arguments = args
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError  = stderrPipe
 
         task.setStatus(.running)
+        let taskID = task.id
+        await MainActor.run { self.processes[taskID] = process }
 
-        let cmd = buildCommand(task: task, settings: settings)
+        do { try process.run() } catch {
+            await MainActor.run { _ = self.processes.removeValue(forKey: taskID) }
+            task.setError(error.localizedDescription)
+            return
+        }
+
+        // Shared duration found in stderr, used for progress from stdout
+        let sharedDuration = SharedDuration()
+
+        let stderrTask = Task<String, Never> {
+            var errorLines: [String] = []
+            do {
+                for try await line in stderrPipe.fileHandleForReading.bytes.lines {
+                    errorLines.append(line)
+                    if await sharedDuration.value == nil,
+                       let d = Self.parseDuration(from: line) {
+                        await sharedDuration.set(d)
+                    }
+                }
+            } catch {}
+            return errorLines.suffix(8).joined(separator: "\n")
+        }
+
+        let progressTask = Task {
+            do {
+                for try await line in stdoutPipe.fileHandleForReading.bytes.lines {
+                    guard line.hasPrefix("out_time_us="),
+                          let us  = Double(line.dropFirst("out_time_us=".count)), us > 0,
+                          let dur = await sharedDuration.value, dur > 0
+                    else { continue }
+                    task.setProgress(min(us / (dur * 1_000_000), 0.99))
+                }
+            } catch {}
+        }
 
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            var resumed = false
-            func resume() {
-                guard !resumed else { return }
-                resumed = true
-                cont.resume()
-            }
+            process.terminationHandler = { _ in cont.resume() }
+        }
 
-            let session = FFmpegKit.executeAsync(
-                cmd,
-                withCompleteCallback: { [weak self] session in
-                    Task { @MainActor [weak self] in
-                        if let sid = session?.getSessionId() {
-                            self?.sessionMap.removeValue(forKey: sid)
-                        }
-                    }
-                    let rc = session?.getReturnCode()
-                    if ReturnCode.isSuccess(rc) {
-                        task.setStatus(.done)
-                        task.setProgress(1.0)
-                    } else if ReturnCode.isCancel(rc) {
-                        task.setStatus(.cancelled)
-                    } else {
-                        let log = session?.getAllLogsAsString() ?? "Неизвестная ошибка"
-                        // Keep last 5 non-empty lines
-                        let lines = log.components(separatedBy: "\n").filter { !$0.isEmpty }
-                        task.setError(lines.suffix(5).joined(separator: "\n"))
-                    }
-                    resume()
-                },
-                withLogCallback: nil,
-                withStatisticsCallback: { stats in
-                    guard let stats, let dur = duration, dur > 0 else { return }
-                    let timeMs = Double(stats.getTime())
-                    task.setProgress(min(timeMs / (dur * 1000.0), 0.99))
-                }
-            )
+        progressTask.cancel()
+        let errorOutput = await stderrTask.value
 
-            if let sid = session?.getSessionId() {
-                Task { @MainActor [weak self] in
-                    self?.sessionMap[sid] = task.id
-                }
+        await MainActor.run { _ = self.processes.removeValue(forKey: taskID) }
+
+        switch process.terminationReason {
+        case .uncaughtSignal:
+            task.setStatus(.cancelled)
+        default:
+            if process.terminationStatus == 0 {
+                task.setStatus(.done)
+                task.setProgress(1.0)
+            } else {
+                task.setError(errorOutput.isEmpty ? "Неизвестная ошибка" : errorOutput)
             }
         }
     }
 
-    private func buildCommand(task: TranscodeTask, settings: AppSettings) -> String {
-        var parts: [String] = [
-            "-i", quoted(task.sourceURL.path),
-            "-y",
-            "-codec:a", "libmp3lame"
-        ]
-
-        if settings.encodingMode == .vbr {
-            parts += ["-q:a", "\(settings.vbrQuality)"]
-        } else {
-            parts += ["-b:a", "\(settings.cbrBitrate)k"]
-        }
-
-        if settings.preserveMetadata {
-            parts += ["-map_metadata", "0", "-id3v2_version", "3"]
-        }
-
-        parts.append(quoted(task.destinationURL.path))
-        return parts.joined(separator: " ")
+    // "  Duration: 00:03:45.23, start: ..."
+    private static func parseDuration(from line: String) -> Double? {
+        guard line.contains("Duration:") else { return nil }
+        let parts = line.components(separatedBy: "Duration:").dropFirst()
+        guard let chunk = parts.first else { return nil }
+        let trimmed = chunk.trimmingCharacters(in: .whitespaces)
+        let hms = trimmed.prefix(while: { $0.isNumber || $0 == ":" || $0 == "." })
+        let components = hms.split(separator: ":")
+        guard components.count == 3,
+              let h = Double(components[0]),
+              let m = Double(components[1]),
+              let s = Double(components[2]) else { return nil }
+        return h * 3600 + m * 60 + s
     }
+}
 
-    private func probeDuration(url: URL) async -> Double? {
-        await withCheckedContinuation { (cont: CheckedContinuation<Double?, Never>) in
-            FFprobeKit.getMediaInformationAsync(url.path) { session in
-                let dur = session?.getMediaInformation()?.getDuration()
-                    .flatMap { Double($0) }
-                cont.resume(returning: dur)
-            }
-        }
-    }
-
-    private func quoted(_ s: String) -> String { "\"\(s.replacingOccurrences(of: "\"", with: "\\\""))\"" }
+// Safely shares duration found in stderr with the progress reader in stdout
+private actor SharedDuration {
+    var value: Double?
+    func set(_ d: Double) { value = d }
 }
