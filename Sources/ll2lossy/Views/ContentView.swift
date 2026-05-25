@@ -13,6 +13,9 @@ struct ContentView: View {
     @State private var showSettings  = false
     @State private var ffmpegMissing = false
 
+    @State private var selectedFileCount: Int? = nil
+    @State private var fileCountTask: Task<Void, Never>? = nil
+
     private var canConvert: Bool {
         !leftSelection.isEmpty && rightRoot != nil
     }
@@ -37,6 +40,7 @@ struct ContentView: View {
 
     private var leftStatusText: String {
         guard !leftSelection.isEmpty else { return "" }
+        if let n = selectedFileCount { return "К конвертации: \(n) файлов" }
         return "Выбрано: \(leftSelection.count)"
     }
 
@@ -87,6 +91,22 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: showProgress)
+        .onChange(of: leftSelection) { _, sel in
+            selectedFileCount = nil
+            fileCountTask?.cancel()
+            guard !sel.isEmpty else { return }
+            fileCountTask = Task.detached(priority: .utility) {
+                var total = 0
+                for url in sel {
+                    if Task.isCancelled { return }
+                    total += collectLosslessURLs(from: url).count
+                }
+                let result = total
+                if !Task.isCancelled {
+                    await MainActor.run { selectedFileCount = result }
+                }
+            }
+        }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {

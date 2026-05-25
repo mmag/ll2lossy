@@ -154,16 +154,20 @@ final class TranscodeEngine: ObservableObject {
         stdoutPipe.fileHandleForWriting.closeFile()
         stderrPipe.fileHandleForWriting.closeFile()
 
-        // Shared duration found in stderr, used for progress from stdout
+        // Read pipes on background threads — must NOT inherit @MainActor or reads
+        // will queue behind UI work and the pipe buffers will fill, stalling ffmpeg.
         let sharedDuration = SharedDuration()
 
-        let stderrTask = Task<String, Never> {
+        let stderrHandle = stderrPipe.fileHandleForReading
+        let stdoutHandle = stdoutPipe.fileHandleForReading
+
+        let stderrTask = Task.detached {
             var errorLines: [String] = []
             do {
-                for try await line in stderrPipe.fileHandleForReading.bytes.lines {
+                for try await line in stderrHandle.bytes.lines {
                     errorLines.append(line)
                     if await sharedDuration.value == nil,
-                       let d = Self.parseDuration(from: line) {
+                       let d = parseDuration(from: line) {
                         await sharedDuration.set(d)
                     }
                 }
@@ -171,9 +175,9 @@ final class TranscodeEngine: ObservableObject {
             return errorLines.suffix(8).joined(separator: "\n")
         }
 
-        let progressTask = Task {
+        let progressTask = Task.detached {
             do {
-                for try await line in stdoutPipe.fileHandleForReading.bytes.lines {
+                for try await line in stdoutHandle.bytes.lines {
                     guard line.hasPrefix("out_time_us="),
                           let us  = Double(line.dropFirst("out_time_us=".count)), us > 0,
                           let dur = await sharedDuration.value, dur > 0
@@ -186,6 +190,11 @@ final class TranscodeEngine: ObservableObject {
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             process.terminationHandler = { _ in cont.resume() }
         }
+
+        // Force-close read ends so detached readers receive EOF immediately
+        // in case they haven't already (e.g. buffered but unread output).
+        stdoutHandle.closeFile()
+        stderrHandle.closeFile()
 
         progressTask.cancel()
         let errorOutput = await stderrTask.value
@@ -205,20 +214,21 @@ final class TranscodeEngine: ObservableObject {
         }
     }
 
-    // "  Duration: 00:03:45.23, start: ..."
-    private static func parseDuration(from line: String) -> Double? {
-        guard line.contains("Duration:") else { return nil }
-        let parts = line.components(separatedBy: "Duration:").dropFirst()
-        guard let chunk = parts.first else { return nil }
-        let trimmed = chunk.trimmingCharacters(in: .whitespaces)
-        let hms = trimmed.prefix(while: { $0.isNumber || $0 == ":" || $0 == "." })
-        let components = hms.split(separator: ":")
-        guard components.count == 3,
-              let h = Double(components[0]),
-              let m = Double(components[1]),
-              let s = Double(components[2]) else { return nil }
-        return h * 3600 + m * 60 + s
-    }
+}
+
+// "  Duration: 00:03:45.23, start: ..."
+private func parseDuration(from line: String) -> Double? {
+    guard line.contains("Duration:") else { return nil }
+    let parts = line.components(separatedBy: "Duration:").dropFirst()
+    guard let chunk = parts.first else { return nil }
+    let trimmed = chunk.trimmingCharacters(in: .whitespaces)
+    let hms = trimmed.prefix(while: { $0.isNumber || $0 == ":" || $0 == "." })
+    let components = hms.split(separator: ":")
+    guard components.count == 3,
+          let h = Double(components[0]),
+          let m = Double(components[1]),
+          let s = Double(components[2]) else { return nil }
+    return h * 3600 + m * 60 + s
 }
 
 // Safely shares duration found in stderr with the progress reader in stdout
