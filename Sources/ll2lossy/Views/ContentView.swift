@@ -10,12 +10,10 @@ struct ContentView: View {
     @State private var leftSelection: Set<UUID> = []
     @State private var showProgress = false
     @State private var showSettings = false
-    @State private var ffmpegAlert  = false
 
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
-                // Left: source panel
                 FileBrowserView(
                     title: "Источник",
                     losslessOnly: true,
@@ -27,25 +25,19 @@ struct ContentView: View {
                 )
                 .frame(minWidth: 280)
 
-                // Right: destination panel
                 FileBrowserView(
                     title: "Назначение",
                     losslessOnly: false,
                     path: $settings.rightPath,
                     root: $rightRoot,
                     selection: .constant([]),
-                    onConvertDrop: { items in
-                        startConversion(sources: items)
-                    },
-                    onNavigateToFolder: { folder in
-                        navigateRight(to: folder)
-                    }
+                    onConvertDrop: { items in startConversion(sources: items) },
+                    onNavigateToFolder: { folder in navigateRight(to: folder) }
                 )
                 .frame(minWidth: 280)
             }
             .frame(minHeight: 400)
 
-            // Progress drawer
             if showProgress {
                 Divider()
                 ProgressDrawerView(engine: engine)
@@ -87,49 +79,27 @@ struct ContentView: View {
             SettingsView()
                 .environmentObject(settings)
         }
-        .alert("ffmpeg не найден", isPresented: $ffmpegAlert) {
-            Button("OK") {}
-        } message: {
-            Text("Установите ffmpeg через Homebrew:\n\nbrew install ffmpeg\n\nЛибо укажите путь вручную в Настройках.")
-        }
     }
 
     // MARK: – Actions
 
     private func convertSelected() {
-        guard FFmpegLocator.locate(override: settings.ffmpegPath) != nil else {
-            ffmpegAlert = true
-            return
-        }
         guard let sourceRoot = leftRoot, let destRoot = rightRoot else { return }
-
         let items = collectSelectedItems(root: sourceRoot, selection: leftSelection)
         guard !items.isEmpty else { return }
-
         showProgress = true
-        engine.enqueue(
-            sources: items,
-            sourceRoot: sourceRoot.url,
-            destinationRoot: destRoot.url,
-            settings: settings
-        )
+        engine.enqueue(sources: items, sourceRoot: sourceRoot.url,
+                       destinationRoot: destRoot.url, settings: settings)
     }
 
     private func startConversion(sources: [FileItem]) {
-        guard FFmpegLocator.locate(override: settings.ffmpegPath) != nil else {
-            ffmpegAlert = true
-            return
-        }
         guard let destRoot = rightRoot else { return }
-        let sourceRoot = leftRoot?.url ?? sources.first?.url.deletingLastPathComponent() ?? destRoot.url
-
+        let sourceRoot = leftRoot?.url
+            ?? sources.first?.url.deletingLastPathComponent()
+            ?? destRoot.url
         showProgress = true
-        engine.enqueue(
-            sources: sources,
-            sourceRoot: sourceRoot,
-            destinationRoot: destRoot.url,
-            settings: settings
-        )
+        engine.enqueue(sources: sources, sourceRoot: sourceRoot,
+                       destinationRoot: destRoot.url, settings: settings)
     }
 
     private func navigateRight(to folder: FileItem) {
@@ -138,15 +108,10 @@ struct ContentView: View {
         rightRoot = folder
     }
 
-    // MARK: – Helpers
-
     private func collectSelectedItems(root: FileItem, selection: Set<UUID>) -> [FileItem] {
         var result: [FileItem] = []
         func traverse(_ item: FileItem) {
-            if selection.contains(item.id) {
-                result.append(item)
-                return
-            }
+            if selection.contains(item.id) { result.append(item); return }
             item.children?.forEach { traverse($0) }
         }
         traverse(root)

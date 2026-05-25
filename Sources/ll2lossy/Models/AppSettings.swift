@@ -13,8 +13,7 @@ final class AppSettings: ObservableObject {
     @Published var onConflict: ConflictBehavior = .skip
 
     // Paths
-    @Published var ffmpegPath: String = ""    // empty = auto-detect
-    @Published var leftPath: String = NSHomeDirectory()
+    @Published var leftPath:  String = NSHomeDirectory()
     @Published var rightPath: String = NSHomeDirectory()
 
     enum EncodingMode: String, CaseIterable, Identifiable {
