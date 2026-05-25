@@ -70,12 +70,17 @@ struct TreeNodeView: View {
                 set: { expanded in
                     item.isExpanded = expanded
                     if expanded && item.children == nil {
-                        item.loadChildren(losslessOnly: losslessOnly)
+                        Task { await item.loadChildrenAsync(losslessOnly: losslessOnly) }
                     }
                 }
             )
         ) {
-            if let children = item.children {
+            if item.isLoading {
+                ProgressView()
+                    .scaleEffect(0.6)
+                    .frame(height: 20)
+                    .padding(.leading, CGFloat(depth + 1) * 14 + 4)
+            } else if let children = item.children {
                 ForEach(children) { child in
                     TreeNodeView(
                         item: child,

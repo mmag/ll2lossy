@@ -5,15 +5,12 @@ import AppKit
 struct FileBrowserView: View {
     let title: String
     let losslessOnly: Bool
-    let eagerLoad: Bool          // left panel: load full tree on open
     @Binding var path: String
     @Binding var root: FileItem?
     @Binding var selection: Set<UUID>
 
     var onConvertDrop: (([FileItem]) -> Void)?
     var onNavigateToFolder: ((FileItem) -> Void)?
-    /// Updated during eager scan: (done, total) first-level directories.
-    var scanProgress: Binding<(Int, Int)?>?
 
     @State private var isLoading = false
     @State private var isDropTargeted = false
@@ -121,19 +118,12 @@ struct FileBrowserView: View {
     private func loadRoot(url: URL) {
         path = url.path
         let item = FileItem(url: url)
-        item.loadChildren(losslessOnly: losslessOnly)
         root = item
         selection = []
-
-        if eagerLoad {
-            isLoading = true
-            Task {
-                await item.loadAllWithProgress(losslessOnly: losslessOnly) { done, total in
-                    scanProgress?.wrappedValue = (done, total)
-                }
-                scanProgress?.wrappedValue = nil
-                isLoading = false
-            }
+        isLoading = true
+        Task {
+            await item.loadChildrenAsync(losslessOnly: losslessOnly)
+            isLoading = false
         }
     }
 

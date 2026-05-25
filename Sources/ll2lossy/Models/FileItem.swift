@@ -43,8 +43,9 @@ final class FileItem: Identifiable, ObservableObject {
     let isDirectory: Bool
     let isLossless: Bool
 
-    @Published var children: [FileItem]?
+    @Published var children: [FileItem]?   // nil = not yet loaded
     @Published var isExpanded = false
+    @Published var isLoading = false
 
     var name: String { url.lastPathComponent }
     var icon: NSImage { NSWorkspace.shared.icon(forFile: url.path) }
@@ -64,63 +65,27 @@ final class FileItem: Identifiable, ObservableObject {
         if isDir.boolValue { self.children = nil }
     }
 
-    private init(entry: EntryInfo) {
+    fileprivate init(entry: EntryInfo) {
         self.url = entry.url
         self.isDirectory = entry.isDirectory
         self.isLossless = entry.isLossless
         if entry.isDirectory { self.children = nil }
     }
 
-    // MARK: – Eager full-tree load with progress (background I/O)
+    // MARK: – Lazy async load (background I/O, called on expand or root open)
 
-    /// Scans the entire subtree off the main thread.
-    /// `onProgress` is called on MainActor with (dirsDone, dirsTotal).
-    func loadAllWithProgress(
-        losslessOnly: Bool,
-        onProgress: @escaping (Int, Int) -> Void
-    ) async {
-        guard isDirectory else { return }
-
-        // Scan first level on background thread to get top-level dirs
-        let topEntries = await Task.detached(priority: .userInitiated) {
-            scanLevel(at: self.url, losslessOnly: losslessOnly)
-        }.value
-
-        let topItems = topEntries.map { FileItem(entry: $0) }
-        self.children = topItems
-
-        let topDirs = topItems.filter { $0.isDirectory }
-        let total = topDirs.count
-
-        if total == 0 { return }
-
-        var done = 0
-        onProgress(done, total)
-
-        for dir in topDirs {
-            await dir.scanRecursively(losslessOnly: losslessOnly)
-            done += 1
-            onProgress(done, total)
-        }
-    }
-
-    private func scanRecursively(losslessOnly: Bool) async {
-        guard isDirectory else { return }
-
+    func loadChildrenAsync(losslessOnly: Bool) async {
+        guard isDirectory, children == nil, !isLoading else { return }
+        isLoading = true
+        let url = self.url
         let entries = await Task.detached(priority: .userInitiated) {
-            scanLevel(at: self.url, losslessOnly: losslessOnly)
+            scanLevel(at: url, losslessOnly: losslessOnly)
         }.value
-
-        let items = entries.map { FileItem(entry: $0) }
-        self.children = items
-
-        for child in items where child.isDirectory {
-            await child.scanRecursively(losslessOnly: losslessOnly)
-        }
+        children = entries.map { FileItem(entry: $0) }
+        isLoading = false
     }
 
-    // MARK: – Lazy single-level load (on-demand expand, runs on main thread — fast for local)
-
+    // Kept for the right-panel navigate-into-folder path (local, one level, fast enough)
     func loadChildren(losslessOnly: Bool) {
         guard isDirectory else { return }
         let fm = FileManager.default
