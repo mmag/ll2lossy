@@ -12,7 +12,7 @@ struct ContentView: View {
     @State private var showProgress  = false
     @State private var showSettings  = false
     @State private var ffmpegMissing = false
-    @State private var scanMessage: String?
+    @State private var scanProgress: (Int, Int)?
 
     private var canConvert: Bool {
         !leftSelection.isEmpty && rightRoot != nil
@@ -37,7 +37,7 @@ struct ContentView: View {
     }
 
     private var leftStatusText: String {
-        if let msg = scanMessage { return "Сканирование: \(msg)" }
+        if let (done, total) = scanProgress { return "Сканирование: \(done) из \(total)" }
         guard !leftSelection.isEmpty else { return "" }
         return "Выбрано: \(leftSelection.count)"
     }
@@ -64,7 +64,7 @@ struct ContentView: View {
                     selection: $leftSelection,
                     onConvertDrop: nil,
                     onNavigateToFolder: nil,
-                    scanMessage: $scanMessage
+                    scanProgress: $scanProgress
                 )
 
                 centerStrip
