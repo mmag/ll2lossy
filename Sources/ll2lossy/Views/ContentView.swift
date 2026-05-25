@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 
+@MainActor
 struct ContentView: View {
     @EnvironmentObject var settings: AppSettings
     @StateObject private var engine = TranscodeEngine()
@@ -12,33 +13,41 @@ struct ContentView: View {
     @State private var showSettings  = false
     @State private var ffmpegMissing = false
 
+    private var canConvert: Bool {
+        !leftSelection.isEmpty && rightRoot != nil
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            HSplitView {
+            // Main two-panel area
+            HStack(spacing: 0) {
                 FileBrowserView(
                     title: "Источник",
                     losslessOnly: true,
+                    eagerLoad: true,
                     path: $settings.leftPath,
                     root: $leftRoot,
                     selection: $leftSelection,
                     onConvertDrop: nil,
                     onNavigateToFolder: nil
                 )
-                .frame(minWidth: 280)
+
+                centerStrip
 
                 FileBrowserView(
                     title: "Назначение",
                     losslessOnly: false,
+                    eagerLoad: false,
                     path: $settings.rightPath,
                     root: $rightRoot,
                     selection: .constant([]),
                     onConvertDrop: { items in startConversion(sources: items) },
                     onNavigateToFolder: { folder in navigateRight(to: folder) }
                 )
-                .frame(minWidth: 280)
             }
-            .frame(minHeight: 400)
+            .padding(10)
 
+            // Progress drawer
             if showProgress {
                 Divider()
                 ProgressDrawerView(engine: engine)
@@ -49,15 +58,6 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.2), value: showProgress)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                Button(action: convertSelected) {
-                    Label("Конвертировать", systemImage: "arrow.right.circle.fill")
-                }
-                .disabled(leftSelection.isEmpty || rightRoot == nil)
-                .keyboardShortcut(.return, modifiers: .command)
-                .help("Конвертировать выбранное (⌘↩)")
-
-                Divider()
-
                 Button {
                     withAnimation { showProgress.toggle() }
                 } label: {
@@ -87,12 +87,34 @@ struct ContentView: View {
         }
     }
 
+    // MARK: – Center strip with convert button
+
+    private var centerStrip: some View {
+        VStack {
+            Spacer()
+            Button(action: convertSelected) {
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.system(size: 32))
+                    .foregroundStyle(canConvert ? Color.accentColor : Color(NSColor.tertiaryLabelColor))
+            }
+            .buttonStyle(.plain)
+            .disabled(!canConvert)
+            .keyboardShortcut(.return, modifiers: .command)
+            .help("Конвертировать выбранное (⌘↩)")
+            Spacer()
+        }
+        .frame(width: 56)
+        .background(Color(NSColor.windowBackgroundColor))
+        .overlay(Divider(), alignment: .leading)
+        .overlay(Divider(), alignment: .trailing)
+    }
+
     // MARK: – Actions
 
     private func convertSelected() {
         guard FFmpegLocator.locate() != nil else { ffmpegMissing = true; return }
         guard let sourceRoot = leftRoot, let destRoot = rightRoot else { return }
-        let items = collectSelectedItems(root: sourceRoot, selection: leftSelection)
+        let items = collectSelectedFiles(root: sourceRoot)
         guard !items.isEmpty else { return }
         showProgress = true
         engine.enqueue(sources: items, sourceRoot: sourceRoot.url,
@@ -116,13 +138,17 @@ struct ContentView: View {
         rightRoot = folder
     }
 
-    private func collectSelectedItems(root: FileItem, selection: Set<UUID>) -> [FileItem] {
+    /// Collects all lossless FileItems whose IDs are in leftSelection.
+    private func collectSelectedFiles(root: FileItem) -> [FileItem] {
         var result: [FileItem] = []
         func traverse(_ item: FileItem) {
-            if selection.contains(item.id) { result.append(item); return }
+            if !item.isDirectory && item.isLossless && leftSelection.contains(item.id) {
+                result.append(item)
+                return
+            }
             item.children?.forEach { traverse($0) }
         }
-        traverse(root)
+        root.children?.forEach { traverse($0) }
         return result
     }
 }

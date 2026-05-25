@@ -1,36 +1,44 @@
 import SwiftUI
 import AppKit
 
+@MainActor
 struct FileBrowserView: View {
     let title: String
     let losslessOnly: Bool
+    let eagerLoad: Bool          // left panel: load full tree on open
     @Binding var path: String
     @Binding var root: FileItem?
     @Binding var selection: Set<UUID>
 
-    /// Called when user drops items from the source panel onto this panel (right panel only)
     var onConvertDrop: (([FileItem]) -> Void)?
-    /// Called when user navigates to a folder by dropping on a folder row (right panel only)
     var onNavigateToFolder: ((FileItem) -> Void)?
 
+    @State private var isLoading = false
     @State private var isDropTargeted = false
 
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            HStack {
+            HStack(spacing: 6) {
                 Text(title)
                     .font(.headline)
-                    .padding(.leading, 8)
                 Spacer()
-                if !selection.isEmpty && losslessOnly {
+                if isLoading {
+                    ProgressView().scaleEffect(0.6).frame(width: 16, height: 16)
+                } else if !selection.isEmpty && losslessOnly {
                     Text("\(selection.count) выбрано")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .padding(.trailing, 8)
                 }
+                Button { reload() } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help("Обновить")
             }
-            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
             .background(Color(NSColor.windowBackgroundColor))
 
             Divider()
@@ -41,7 +49,7 @@ struct FileBrowserView: View {
 
             Divider()
 
-            // File tree
+            // Tree
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let root {
@@ -51,6 +59,7 @@ struct FileBrowserView: View {
                                     item: child,
                                     selection: $selection,
                                     losslessOnly: losslessOnly,
+                                    showCheckbox: losslessOnly,
                                     depth: 0,
                                     onDropFolder: onNavigateToFolder
                                 )
@@ -72,32 +81,25 @@ struct FileBrowserView: View {
             }
             .background(
                 isDropTargeted
-                    ? Color.accentColor.opacity(0.08)
+                    ? Color.accentColor.opacity(0.07)
                     : Color(NSColor.textBackgroundColor)
             )
             .animation(.easeInOut(duration: 0.15), value: isDropTargeted)
-            // Drop target for convert-by-drag (right panel)
             .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
                 guard let convert = onConvertDrop else { return false }
-                // Items come from DragCoordinator via NSItemProvider with fileURL
-                // We collect URLs and match them to items — engine handles recursion
                 var urls: [URL] = []
                 let group = DispatchGroup()
                 for provider in providers {
                     group.enter()
                     provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
                         if let data = item as? Data,
-                           let url = URL(dataRepresentation: data, relativeTo: nil) {
-                            urls.append(url)
-                        } else if let url = item as? URL {
-                            urls.append(url)
-                        }
+                           let url  = URL(dataRepresentation: data, relativeTo: nil) { urls.append(url) }
+                        else if let url = item as? URL { urls.append(url) }
                         group.leave()
                     }
                 }
                 group.notify(queue: .main) {
-                    let items = urls.map { FileItem(url: $0) }
-                    convert(items)
+                    convert(urls.map { FileItem(url: $0) })
                 }
                 return true
             }
@@ -111,11 +113,29 @@ struct FileBrowserView: View {
         }
     }
 
+    // MARK: – Loading
+
     private func loadRoot(url: URL) {
         path = url.path
         let item = FileItem(url: url)
         item.loadChildren(losslessOnly: losslessOnly)
         root = item
         selection = []
+
+        if eagerLoad {
+            isLoading = true
+            Task {
+                await item.loadAll(losslessOnly: losslessOnly)
+                isLoading = false
+            }
+        }
+    }
+
+    private func reload() {
+        let url = URL(fileURLWithPath: path)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir),
+              isDir.boolValue else { return }
+        loadRoot(url: url)
     }
 }
