@@ -105,6 +105,7 @@ struct FileBrowserView: View {
             }
         }
         .onAppear {
+            guard !path.isEmpty else { return }
             let url = URL(fileURLWithPath: path)
             var isDir: ObjCBool = false
             if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
