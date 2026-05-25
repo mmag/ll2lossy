@@ -12,6 +12,8 @@ struct FileBrowserView: View {
 
     var onConvertDrop: (([FileItem]) -> Void)?
     var onNavigateToFolder: ((FileItem) -> Void)?
+    /// Updated during eager scan with the directory currently being read.
+    var scanMessage: Binding<String?>?
 
     @State private var isLoading = false
     @State private var isDropTargeted = false
@@ -126,7 +128,10 @@ struct FileBrowserView: View {
         if eagerLoad {
             isLoading = true
             Task {
-                await item.loadAll(losslessOnly: losslessOnly)
+                await item.loadAll(losslessOnly: losslessOnly) { dirName in
+                    scanMessage?.wrappedValue = dirName
+                }
+                scanMessage?.wrappedValue = nil
                 isLoading = false
             }
         }

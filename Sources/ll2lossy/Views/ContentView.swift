@@ -12,9 +12,43 @@ struct ContentView: View {
     @State private var showProgress  = false
     @State private var showSettings  = false
     @State private var ffmpegMissing = false
+    @State private var scanMessage: String?
 
     private var canConvert: Bool {
         !leftSelection.isEmpty && rightRoot != nil
+    }
+
+    // MARK: – Status bar
+
+    private var statusBar: some View {
+        HStack(spacing: 0) {
+            Text(leftStatusText)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(rightStatusText)
+                .foregroundStyle(.secondary)
+        }
+        .font(.system(size: 11))
+        .lineLimit(1)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private var leftStatusText: String {
+        if let msg = scanMessage { return "Сканирование: \(msg)" }
+        guard !leftSelection.isEmpty else { return "" }
+        return "Выбрано: \(leftSelection.count)"
+    }
+
+    private var rightStatusText: String {
+        let total = engine.tasks.count
+        guard total > 0 else { return "" }
+        let done = engine.tasks.filter { $0.status == .done }.count
+        return engine.isRunning
+            ? "Конвертация: \(done) / \(total)"
+            : "Сконвертировано: \(done) / \(total)"
     }
 
     var body: some View {
@@ -29,7 +63,8 @@ struct ContentView: View {
                     root: $leftRoot,
                     selection: $leftSelection,
                     onConvertDrop: nil,
-                    onNavigateToFolder: nil
+                    onNavigateToFolder: nil,
+                    scanMessage: $scanMessage
                 )
 
                 centerStrip
@@ -46,6 +81,10 @@ struct ContentView: View {
                 )
             }
             .padding(10)
+
+            // Status bar
+            Divider()
+            statusBar
 
             // Progress drawer
             if showProgress {

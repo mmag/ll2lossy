@@ -30,15 +30,17 @@ final class FileItem: Identifiable, ObservableObject {
         if isDir.boolValue { self.children = nil }
     }
 
-    /// Recursively loads the full subtree. Call with await; yields control between directories.
-    func loadAll(losslessOnly: Bool) async {
+    /// Recursively loads the full subtree.
+    /// `onProgress` is called on MainActor with the name of each directory as it's scanned.
+    func loadAll(losslessOnly: Bool, onProgress: ((String) -> Void)? = nil) async {
         if children == nil {
             loadChildren(losslessOnly: losslessOnly)
         }
+        onProgress?(name)
         guard let children else { return }
         for child in children where child.isDirectory {
             await Task.yield()
-            await child.loadAll(losslessOnly: losslessOnly)
+            await child.loadAll(losslessOnly: losslessOnly, onProgress: onProgress)
         }
     }
 
