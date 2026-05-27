@@ -5,6 +5,7 @@ import AppKit
 struct ContentView: View {
     @EnvironmentObject var settings: AppSettings
     @StateObject private var engine = TranscodeEngine()
+    @StateObject private var previewPlayer = AudioPreviewPlayer()
 
     @State private var leftRoot:  FileItem?
     @State private var rightRoot: FileItem?
@@ -149,6 +150,7 @@ struct ContentView: View {
                     title: "Источник",
                     subtitle: "Lossless-аудио для обработки",
                     losslessOnly: true,
+                    previewPlayer: previewPlayer,
                     path: $settings.leftPath,
                     root: $leftRoot,
                     selection: $leftSelection,
@@ -160,6 +162,7 @@ struct ContentView: View {
                     title: "Назначение",
                     subtitle: "Папка для MP3 и готовых файлов",
                     losslessOnly: false,
+                    previewPlayer: previewPlayer,
                     path: $settings.rightPath,
                     root: $rightRoot,
                     selection: $rightSelection,

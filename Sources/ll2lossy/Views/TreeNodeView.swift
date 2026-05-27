@@ -65,12 +65,15 @@ func toggleCheckbox(item: FileItem, selection: Binding<Set<URL>>) {
 @MainActor
 struct TreeNodeView: View {
     @ObservedObject var item: FileItem
+    @ObservedObject var previewPlayer: AudioPreviewPlayer
     @Binding var selection: Set<URL>
+    @Binding var focusedURL: URL?
     let losslessOnly: Bool
     let showCheckbox: Bool
     let depth: Int
     let onDropFolder: ((FileItem) -> Void)?
     let onMoveToFolder: ((FileItem, [NSItemProvider]) -> Void)?
+    let onFocus: (FileItem) -> Void
 
     @State private var folderDropTargeted = false
     @State private var isHovering = false
@@ -106,12 +109,15 @@ struct TreeNodeView: View {
                 ForEach(children) { child in
                     TreeNodeView(
                         item: child,
+                        previewPlayer: previewPlayer,
                         selection: $selection,
+                        focusedURL: $focusedURL,
                         losslessOnly: losslessOnly,
                         showCheckbox: showCheckbox,
                         depth: depth + 1,
                         onDropFolder: onDropFolder,
-                        onMoveToFolder: onMoveToFolder
+                        onMoveToFolder: onMoveToFolder,
+                        onFocus: onFocus
                     )
                 }
             }
@@ -147,6 +153,7 @@ struct TreeNodeView: View {
     private func rowLabel(isDirectory: Bool) -> some View {
         let state = showCheckbox ? checkboxState(of: item, in: selection) : .unchecked
         let isSelected = state != .unchecked
+        let isFocused = focusedURL == item.url
 
         return HStack(spacing: 7) {
             if showCheckbox {
@@ -163,6 +170,12 @@ struct TreeNodeView: View {
             Image(nsImage: item.icon)
                 .resizable()
                 .frame(width: 17, height: 17)
+
+            if previewPlayer.isPlaying(url: item.url) {
+                PlayingIndicator()
+                    .frame(width: 16, height: 16)
+                    .transition(.opacity)
+            }
 
             Text(item.name)
                 .font(.system(size: 13))
@@ -183,14 +196,19 @@ struct TreeNodeView: View {
         }
         .frame(height: 28)
         .padding(.horizontal, 7)
-        .background(rowBackground(isSelected: isSelected))
+        .background(rowBackground(isFocused: isFocused, isSelected: isSelected))
         .clipShape(RoundedRectangle(cornerRadius: 5))
         .onHover { isHovering = $0 }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onFocus(item)
+        }
     }
 
-    private func rowBackground(isSelected: Bool) -> Color {
+    private func rowBackground(isFocused: Bool, isSelected: Bool) -> Color {
         if folderDropTargeted { return Color.accentColor.opacity(0.14) }
-        if isSelected { return Color.accentColor.opacity(0.10) }
+        if isFocused { return Color.accentColor.opacity(0.18) }
+        if isSelected { return Color.accentColor.opacity(0.07) }
         if isHovering { return Color(NSColor.controlAccentColor).opacity(0.07) }
         return .clear
     }
@@ -208,5 +226,29 @@ struct TreeNodeView: View {
         case .checked, .mixed: return .accentColor
         case .unchecked:       return Color(NSColor.tertiaryLabelColor)
         }
+    }
+}
+
+private struct PlayingIndicator: View {
+    @State private var phase = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 2) {
+            bar(height: phase ? 5 : 12)
+            bar(height: phase ? 12 : 7)
+            bar(height: phase ? 8 : 14)
+        }
+        .frame(width: 16, height: 16)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.48).repeatForever(autoreverses: true)) {
+                phase.toggle()
+            }
+        }
+    }
+
+    private func bar(height: CGFloat) -> some View {
+        Capsule()
+            .fill(Color.accentColor)
+            .frame(width: 3, height: height)
     }
 }

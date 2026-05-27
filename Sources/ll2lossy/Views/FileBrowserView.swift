@@ -6,6 +6,7 @@ struct FileBrowserView: View {
     let title: String
     let subtitle: String
     let losslessOnly: Bool
+    @ObservedObject var previewPlayer: AudioPreviewPlayer
     @Binding var path: String
     @Binding var root: FileItem?
     @Binding var selection: Set<URL>
@@ -18,6 +19,7 @@ struct FileBrowserView: View {
     @State private var isDropTargeted = false
     @State private var showDeleteConfirm = false
     @State private var deleteItemCount = 0
+    @State private var focusedURL: URL?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,6 +46,14 @@ struct FileBrowserView: View {
                 if !losslessOnly {
                     destinationMenu
                 }
+
+                Button { togglePlayback() } label: {
+                    Image(systemName: playbackIcon)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .disabled(playableSelection == nil)
+                .help(playbackHelp)
 
                 Button { reload() } label: {
                     Image(systemName: "arrow.clockwise")
@@ -76,12 +86,15 @@ struct FileBrowserView: View {
                             ForEach(children) { child in
                                 TreeNodeView(
                                     item: child,
+                                    previewPlayer: previewPlayer,
                                     selection: $selection,
+                                    focusedURL: $focusedURL,
                                     losslessOnly: losslessOnly,
                                     showCheckbox: true,
                                     depth: 0,
                                     onDropFolder: onNavigateToFolder,
-                                    onMoveToFolder: onMoveToFolder
+                                    onMoveToFolder: onMoveToFolder,
+                                    onFocus: focusItem
                                 )
                             }
                         } else {
@@ -174,6 +187,35 @@ struct FileBrowserView: View {
         .help("Действия с папкой назначения")
     }
 
+    private var playableSelection: URL? {
+        guard let url = focusedURL else { return nil }
+        var isDir: ObjCBool = false
+        FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+        guard !isDir.boolValue else { return nil }
+        return FileItem.audioExtensions.contains(url.pathExtension.lowercased()) ? url : nil
+    }
+
+    private var playbackIcon: String {
+        guard let url = playableSelection else { return "play.circle" }
+        return previewPlayer.isPlaying(url: url) ? "pause.circle.fill" : "play.circle.fill"
+    }
+
+    private var playbackHelp: String {
+        guard let url = playableSelection else { return "Выберите один аудиофайл" }
+        return previewPlayer.isPlaying(url: url) ? "Пауза" : "Воспроизвести \(url.lastPathComponent)"
+    }
+
+    private func togglePlayback() {
+        guard let url = playableSelection else { return }
+        previewPlayer.toggle(url: url)
+    }
+
+    private func focusItem(_ item: FileItem) {
+        focusedURL = item.url
+        guard item.isLossless, previewPlayer.isPlaying, previewPlayer.currentURL != item.url else { return }
+        previewPlayer.play(url: item.url)
+    }
+
     private func selectionBadge(_ value: String) -> some View {
         Text(value)
             .font(.caption.monospacedDigit())
@@ -248,6 +290,7 @@ struct FileBrowserView: View {
         let item = FileItem(url: url)
         root = item
         selection = []
+        focusedURL = nil
         isLoading = true
         Task {
             await item.loadChildrenAsync(losslessOnly: losslessOnly)
