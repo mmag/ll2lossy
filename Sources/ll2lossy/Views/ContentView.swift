@@ -21,31 +21,86 @@ struct ContentView: View {
         !leftSelection.isEmpty && rightRoot != nil
     }
 
-    // MARK: – Status bar
+    // MARK: – Command and status
+
+    private var commandBar: some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Подготовка конвертации")
+                    .font(.headline)
+                Text(commandSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: convertSelected) {
+                Label("Конвертировать", systemImage: "arrow.right.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!canConvert)
+            .keyboardShortcut(.return, modifiers: .command)
+            .help("Конвертировать выбранное (⌘↩)")
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(.regularMaterial)
+    }
 
     private var statusBar: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                Text(leftStatusText)
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                if engine.tasks.isEmpty {
+                    Label(leftStatusText.isEmpty ? "Очередь пуста" : leftStatusText,
+                          systemImage: leftStatusText.isEmpty ? "tray" : "checklist")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Label(rightStatusText, systemImage: engine.isRunning ? "arrow.2.circlepath" : "checkmark.circle")
+                        .foregroundStyle(engine.isRunning ? Color.accentColor : .secondary)
+                }
+
                 Spacer()
-                Text(rightStatusText)
-                    .foregroundStyle(.secondary)
+
+                if !engine.tasks.isEmpty {
+                    Button {
+                        withAnimation { showProgress.toggle() }
+                    } label: {
+                        Label(showProgress ? "Скрыть очередь" : "Показать очередь",
+                              systemImage: showProgress ? "chevron.down" : "list.bullet")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                }
             }
-            .font(.system(size: 11))
+            .font(.system(size: 12))
             .lineLimit(1)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
 
             if engine.isRunning || (engine.overallProgress > 0 && engine.overallProgress < 1) {
                 ProgressView(value: engine.overallProgress)
                     .progressViewStyle(.linear)
                     .frame(height: 3)
-                    .padding(.horizontal, 0)
             }
         }
         .frame(maxWidth: .infinity)
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+
+    private var commandSummary: String {
+        let source = leftStatusText.isEmpty ? "выберите источник" : leftStatusText.lowercased()
+        let destination: String
+        if let rightRoot {
+            destination = rightRoot.url.path
+        } else if settings.rightPath.isEmpty {
+            destination = "выберите папку назначения"
+        } else {
+            destination = settings.rightPath
+        }
+        return "\(source) -> \(destination)"
     }
 
     private var leftStatusText: String {
@@ -65,9 +120,13 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
+            commandBar
+            Divider()
+
+            HStack(spacing: 12) {
                 FileBrowserView(
                     title: "Источник",
+                    subtitle: "Lossless-аудио для обработки",
                     losslessOnly: true,
                     path: $settings.leftPath,
                     root: $leftRoot,
@@ -76,10 +135,9 @@ struct ContentView: View {
                     onNavigateToFolder: nil
                 )
 
-                centerStrip
-
                 FileBrowserView(
                     title: "Назначение",
+                    subtitle: "Папка для MP3 и готовых файлов",
                     losslessOnly: false,
                     path: $settings.rightPath,
                     root: $rightRoot,
@@ -89,7 +147,8 @@ struct ContentView: View {
                     onMoveToFolder: { folder, providers in moveItems(providers, to: folder) }
                 )
             }
-            .padding(10)
+            .padding(14)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
             statusBar
@@ -101,6 +160,7 @@ struct ContentView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .background(Color(NSColor.windowBackgroundColor))
         .animation(.easeInOut(duration: 0.2), value: showProgress)
         .onChange(of: leftSelection) { _, sel in
             selectedFileCount = nil
@@ -147,28 +207,6 @@ struct ContentView: View {
         } message: {
             Text("Запустите в терминале:\n\n./setup.sh\n\nСкрипт скопирует ffmpeg из Homebrew. Если Homebrew не установлен: brew install ffmpeg")
         }
-    }
-
-    // MARK: – Center strip
-
-    private var centerStrip: some View {
-        VStack {
-            Spacer()
-            Button(action: convertSelected) {
-                Image(systemName: "arrow.right.circle.fill")
-                    .font(.system(size: 32))
-                    .foregroundStyle(canConvert ? Color.accentColor : Color(NSColor.tertiaryLabelColor))
-            }
-            .buttonStyle(.plain)
-            .disabled(!canConvert)
-            .keyboardShortcut(.return, modifiers: .command)
-            .help("Конвертировать выбранное (⌘↩)")
-            Spacer()
-        }
-        .frame(width: 56)
-        .background(Color(NSColor.windowBackgroundColor))
-        .overlay(Divider(), alignment: .leading)
-        .overlay(Divider(), alignment: .trailing)
     }
 
     // MARK: – Actions

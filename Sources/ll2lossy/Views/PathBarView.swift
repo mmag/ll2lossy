@@ -6,20 +6,27 @@ struct PathBarView: View {
     let onPathChanged: (URL) -> Void
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 8) {
+            Image(systemName: "folder")
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+
             TextField("Путь к папке", text: $path)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .font(.system(size: 12, design: .monospaced))
                 .onSubmit { commitPath() }
+                .lineLimit(1)
 
             Button(action: browse) {
-                Image(systemName: "folder")
+                Image(systemName: "folder.badge.plus")
             }
             .buttonStyle(.borderless)
+            .controlSize(.small)
             .help("Выбрать папку")
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color(NSColor.textBackgroundColor).opacity(0.75))
     }
 
     private func browse() {
@@ -29,7 +36,8 @@ struct PathBarView: View {
         panel.allowsMultipleSelection = false
         panel.title = "Выберите папку"
         panel.prompt = "Открыть"
-        if let current = URL(string: path), FileManager.default.fileExists(atPath: current.path) {
+        let current = URL(fileURLWithPath: path)
+        if FileManager.default.fileExists(atPath: current.path) {
             panel.directoryURL = current
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }

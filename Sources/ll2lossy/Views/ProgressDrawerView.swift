@@ -9,12 +9,11 @@ struct ProgressDrawerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 4) {
-                        Text("Конвертация")
-                            .font(.headline)
+                        Label("Очередь", systemImage: "list.bullet.rectangle")
+                            .font(.system(size: 14, weight: .semibold))
                         Spacer()
                         if total > 0 {
                             Text("\(doneCount) из \(total) файлов")
@@ -27,25 +26,27 @@ struct ProgressDrawerView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    if total > 0 {
-                        ProgressView(value: engine.overallProgress)
-                            .progressViewStyle(.linear)
-                    }
                 }
                 .frame(maxWidth: .infinity)
 
                 if engine.isRunning {
-                    Button("Отменить все", role: .destructive) { engine.cancelAll() }
-                        .buttonStyle(.borderless)
-                        .fixedSize()
+                    Button(role: .destructive) { engine.cancelAll() } label: {
+                        Label("Отменить все", systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .fixedSize()
                 } else if !engine.tasks.isEmpty {
-                    Button("Очистить") { engine.clearCompleted() }
-                        .buttonStyle(.borderless)
-                        .fixedSize()
+                    Button { engine.clearCompleted() } label: {
+                        Label("Очистить", systemImage: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .fixedSize()
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
             .background(Color(NSColor.windowBackgroundColor))
 
             if errorCount > 0 {
@@ -58,8 +59,8 @@ struct ProgressDrawerView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
                 .background(Color.orange.opacity(0.07))
             }
 
@@ -90,14 +91,12 @@ struct TaskRowView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // Status icon
             statusIcon
                 .frame(width: 16, height: 16)
 
-            // File name + progress
             VStack(alignment: .leading, spacing: 2) {
                 Text(task.name)
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
                     .lineLimit(1)
 
                 if task.status == .running {
@@ -117,7 +116,6 @@ struct TaskRowView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Percentage or cancel
             if task.status == .running {
                 Text("\(Int(task.progress * 100))%")
                     .font(.caption.monospacedDigit())
@@ -133,8 +131,9 @@ struct TaskRowView: View {
                 .buttonStyle(.borderless)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(task.status == .running ? Color.accentColor.opacity(0.06) : Color.clear)
     }
 
     @ViewBuilder

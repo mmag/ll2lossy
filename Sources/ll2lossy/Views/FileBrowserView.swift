@@ -4,6 +4,7 @@ import AppKit
 @MainActor
 struct FileBrowserView: View {
     let title: String
+    let subtitle: String
     let losslessOnly: Bool
     @Binding var path: String
     @Binding var root: FileItem?
@@ -20,52 +21,39 @@ struct FileBrowserView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack(spacing: 6) {
-                Text(title)
-                    .font(.headline)
-                Spacer()
-                if isLoading {
-                    ProgressView().scaleEffect(0.6).frame(width: 16, height: 16)
-                } else if !selection.isEmpty && losslessOnly {
-                    Text("\(selection.count) выбрано")
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
+
+                Spacer()
+
+                if isLoading {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .frame(width: 18, height: 18)
+                } else if !selection.isEmpty && losslessOnly {
+                    selectionBadge("\(selection.count)")
+                }
+
                 if !losslessOnly {
-                    Button { selectAll() } label: {
-                        Image(systemName: "checkmark.square")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Выделить все")
-
-                    Button { selection = [] } label: {
-                        Image(systemName: "square")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Снять выделение")
-
-                    Button { prepareDelete() } label: {
-                        Image(systemName: "trash")
-                            .font(.caption)
-                            .foregroundStyle(selection.isEmpty ? Color(NSColor.tertiaryLabelColor) : .red)
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(selection.isEmpty)
-                    .help("Удалить выбранное")
+                    destinationMenu
                 }
+
                 Button { reload() } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.caption)
                 }
                 .buttonStyle(.borderless)
+                .controlSize(.small)
                 .help("Обновить")
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(Color(NSColor.windowBackgroundColor))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
 
             Divider()
 
@@ -75,11 +63,16 @@ struct FileBrowserView: View {
 
             Divider()
 
-            // Tree
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let root {
                         if let children = root.children {
+                            if children.isEmpty {
+                                emptyState(
+                                    title: losslessOnly ? "Нет подходящих аудиофайлов" : "Папка пуста",
+                                    systemImage: losslessOnly ? "waveform.slash" : "folder"
+                                )
+                            }
                             ForEach(children) { child in
                                 TreeNodeView(
                                     item: child,
@@ -97,19 +90,17 @@ struct FileBrowserView: View {
                                 .padding(.top, 40)
                         }
                     } else {
-                        Text("Выберите папку")
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 40)
+                        emptyState(title: "Выберите папку", systemImage: "folder.badge.plus")
                     }
                 }
-                .padding(.top, 4)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(
                 isDropTargeted
                     ? Color.accentColor.opacity(0.07)
-                    : Color(NSColor.textBackgroundColor)
+                    : Color(NSColor.textBackgroundColor).opacity(0.92)
             )
             .animation(.easeInOut(duration: 0.15), value: isDropTargeted)
             .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
@@ -131,6 +122,12 @@ struct FileBrowserView: View {
                 return true
             }
         }
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(NSColor.separatorColor).opacity(0.55), lineWidth: 1)
+        }
         .confirmationDialog(
             "Удалить \(deleteItemCount) \(itemWord(deleteItemCount))?",
             isPresented: $showDeleteConfirm,
@@ -147,6 +144,58 @@ struct FileBrowserView: View {
                 loadRoot(url: url)
             }
         }
+    }
+
+    // MARK: – Header helpers
+
+    private var destinationMenu: some View {
+        Menu {
+            Button { selectAll() } label: {
+                Label("Выделить все", systemImage: "checkmark.square")
+            }
+            .disabled(root?.children?.isEmpty ?? true)
+
+            Button { selection = [] } label: {
+                Label("Снять выделение", systemImage: "square")
+            }
+            .disabled(selection.isEmpty)
+
+            Divider()
+
+            Button(role: .destructive) { prepareDelete() } label: {
+                Label("Удалить выбранное", systemImage: "trash")
+            }
+            .disabled(selection.isEmpty)
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .controlSize(.small)
+        .help("Действия с папкой назначения")
+    }
+
+    private func selectionBadge(_ value: String) -> some View {
+        Text(value)
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.accentColor.opacity(0.12))
+            .clipShape(Capsule())
+            .help("\(value) выбрано")
+    }
+
+    private func emptyState(title: String, systemImage: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 24))
+                .foregroundStyle(.tertiary)
+            Text(title)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 48)
     }
 
     // MARK: – Selection & deletion

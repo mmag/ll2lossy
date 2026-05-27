@@ -73,6 +73,7 @@ struct TreeNodeView: View {
     let onMoveToFolder: ((FileItem, [NSItemProvider]) -> Void)?
 
     @State private var folderDropTargeted = false
+    @State private var isHovering = false
 
     var body: some View {
         if item.isDirectory {
@@ -144,9 +145,11 @@ struct TreeNodeView: View {
     // MARK: Shared label
 
     private func rowLabel(isDirectory: Bool) -> some View {
-        HStack(spacing: 4) {
+        let state = showCheckbox ? checkboxState(of: item, in: selection) : .unchecked
+        let isSelected = state != .unchecked
+
+        return HStack(spacing: 7) {
             if showCheckbox {
-                let state = checkboxState(of: item, in: selection)
                 Button {
                     toggleCheckbox(item: item, selection: $selection)
                 } label: {
@@ -159,10 +162,12 @@ struct TreeNodeView: View {
 
             Image(nsImage: item.icon)
                 .resizable()
-                .frame(width: 16, height: 16)
+                .frame(width: 17, height: 17)
 
             Text(item.name)
+                .font(.system(size: 13))
                 .lineLimit(1)
+                .foregroundStyle(.primary)
 
             Spacer()
 
@@ -170,13 +175,24 @@ struct TreeNodeView: View {
                 Text(item.url.pathExtension.uppercased())
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 4)
-                    .background(Color.secondary.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
             }
         }
-        .padding(.vertical, 2)
-        .padding(.horizontal, 4)
+        .frame(height: 28)
+        .padding(.horizontal, 7)
+        .background(rowBackground(isSelected: isSelected))
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .onHover { isHovering = $0 }
+    }
+
+    private func rowBackground(isSelected: Bool) -> Color {
+        if folderDropTargeted { return Color.accentColor.opacity(0.14) }
+        if isSelected { return Color.accentColor.opacity(0.10) }
+        if isHovering { return Color(NSColor.controlAccentColor).opacity(0.07) }
+        return .clear
     }
 
     private func checkboxIcon(_ state: CheckboxState) -> String {
