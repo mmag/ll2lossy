@@ -8,7 +8,8 @@ struct ContentView: View {
 
     @State private var leftRoot:  FileItem?
     @State private var rightRoot: FileItem?
-    @State private var leftSelection: Set<URL> = []
+    @State private var leftSelection:  Set<URL> = []
+    @State private var rightSelection: Set<URL> = []
     @State private var showProgress  = false
     @State private var showSettings  = false
     @State private var ffmpegMissing = false
@@ -23,17 +24,26 @@ struct ContentView: View {
     // MARK: – Status bar
 
     private var statusBar: some View {
-        HStack(spacing: 0) {
-            Text(leftStatusText)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(rightStatusText)
-                .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Text(leftStatusText)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(rightStatusText)
+                    .foregroundStyle(.secondary)
+            }
+            .font(.system(size: 11))
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+
+            if engine.isRunning || (engine.overallProgress > 0 && engine.overallProgress < 1) {
+                ProgressView(value: engine.overallProgress)
+                    .progressViewStyle(.linear)
+                    .frame(height: 3)
+                    .padding(.horizontal, 0)
+            }
         }
-        .font(.system(size: 11))
-        .lineLimit(1)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
         .frame(maxWidth: .infinity)
         .background(Color(NSColor.windowBackgroundColor))
     }
@@ -73,9 +83,10 @@ struct ContentView: View {
                     losslessOnly: false,
                     path: $settings.rightPath,
                     root: $rightRoot,
-                    selection: .constant([]),
+                    selection: $rightSelection,
                     onConvertDrop: { items in startConversion(sources: items) },
-                    onNavigateToFolder: { folder in navigateRight(to: folder) }
+                    onNavigateToFolder: nil,
+                    onMoveToFolder: { folder, providers in moveItems(providers, to: folder) }
                 )
             }
             .padding(10)
@@ -190,5 +201,41 @@ struct ContentView: View {
         settings.rightPath = folder.url.path
         folder.loadChildren(losslessOnly: false)
         rightRoot = folder
+    }
+
+    private func moveItems(_ providers: [NSItemProvider], to folder: FileItem) {
+        var urls: [URL] = []
+        let group = DispatchGroup()
+        for provider in providers {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
+                if let data = item as? Data,
+                   let url = URL(dataRepresentation: data, relativeTo: nil) { urls.append(url) }
+                else if let url = item as? URL { urls.append(url) }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) {
+            guard let rightURL = self.rightRoot?.url else { return }
+            var moved = false
+            for url in urls {
+                guard url.path.hasPrefix(rightURL.path + "/") || url.path == rightURL.path else { continue }
+                guard url != folder.url, !folder.url.path.hasPrefix(url.path + "/") else { continue }
+                let dest = folder.url.appendingPathComponent(url.lastPathComponent)
+                guard url != dest else { continue }
+                try? FileManager.default.moveItem(at: url, to: dest)
+                moved = true
+            }
+            if moved { self.reloadRight() }
+        }
+    }
+
+    private func reloadRight() {
+        guard !settings.rightPath.isEmpty else { return }
+        let url = URL(fileURLWithPath: settings.rightPath)
+        rightSelection = []
+        let item = FileItem(url: url)
+        rightRoot = item
+        Task { await item.loadChildrenAsync(losslessOnly: false) }
     }
 }

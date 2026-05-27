@@ -70,6 +70,9 @@ struct TreeNodeView: View {
     let showCheckbox: Bool
     let depth: Int
     let onDropFolder: ((FileItem) -> Void)?
+    let onMoveToFolder: ((FileItem, [NSItemProvider]) -> Void)?
+
+    @State private var folderDropTargeted = false
 
     var body: some View {
         if item.isDirectory {
@@ -106,14 +109,21 @@ struct TreeNodeView: View {
                         losslessOnly: losslessOnly,
                         showCheckbox: showCheckbox,
                         depth: depth + 1,
-                        onDropFolder: onDropFolder
+                        onDropFolder: onDropFolder,
+                        onMoveToFolder: onMoveToFolder
                     )
                 }
             }
         } label: {
             rowLabel(isDirectory: true)
                 .contentShape(Rectangle())
-                .onDrop(of: [.fileURL], isTargeted: nil) { _ in
+                .background(folderDropTargeted ? Color.accentColor.opacity(0.12) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .onDrop(of: [.fileURL], isTargeted: $folderDropTargeted) { providers in
+                    if let moveHandler = onMoveToFolder {
+                        moveHandler(item, providers)
+                        return true
+                    }
                     onDropFolder?(item); return true
                 }
         }
@@ -135,7 +145,7 @@ struct TreeNodeView: View {
 
     private func rowLabel(isDirectory: Bool) -> some View {
         HStack(spacing: 4) {
-            if showCheckbox && (isDirectory || item.isLossless) {
+            if showCheckbox {
                 let state = checkboxState(of: item, in: selection)
                 Button {
                     toggleCheckbox(item: item, selection: $selection)

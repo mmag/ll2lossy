@@ -11,9 +11,12 @@ struct FileBrowserView: View {
 
     var onConvertDrop: (([FileItem]) -> Void)?
     var onNavigateToFolder: ((FileItem) -> Void)?
+    var onMoveToFolder: ((FileItem, [NSItemProvider]) -> Void)?
 
     @State private var isLoading = false
     @State private var isDropTargeted = false
+    @State private var showDeleteConfirm = false
+    @State private var deleteItemCount = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,6 +31,30 @@ struct FileBrowserView: View {
                     Text("\(selection.count) выбрано")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                if !losslessOnly {
+                    Button { selectAll() } label: {
+                        Image(systemName: "checkmark.square")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Выделить все")
+
+                    Button { selection = [] } label: {
+                        Image(systemName: "square")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Снять выделение")
+
+                    Button { prepareDelete() } label: {
+                        Image(systemName: "trash")
+                            .font(.caption)
+                            .foregroundStyle(selection.isEmpty ? Color(NSColor.tertiaryLabelColor) : .red)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(selection.isEmpty)
+                    .help("Удалить выбранное")
                 }
                 Button { reload() } label: {
                     Image(systemName: "arrow.clockwise")
@@ -58,9 +85,10 @@ struct FileBrowserView: View {
                                     item: child,
                                     selection: $selection,
                                     losslessOnly: losslessOnly,
-                                    showCheckbox: losslessOnly,
+                                    showCheckbox: true,
                                     depth: 0,
-                                    onDropFolder: onNavigateToFolder
+                                    onDropFolder: onNavigateToFolder,
+                                    onMoveToFolder: onMoveToFolder
                                 )
                             }
                         } else {
@@ -103,6 +131,14 @@ struct FileBrowserView: View {
                 return true
             }
         }
+        .confirmationDialog(
+            "Удалить \(deleteItemCount) \(itemWord(deleteItemCount))?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Удалить", role: .destructive) { deleteSelected() }
+            Button("Отмена", role: .cancel) {}
+        }
         .onAppear {
             guard !path.isEmpty else { return }
             let url = URL(fileURLWithPath: path)
@@ -111,6 +147,49 @@ struct FileBrowserView: View {
                 loadRoot(url: url)
             }
         }
+    }
+
+    // MARK: – Selection & deletion
+
+    private func prepareDelete() {
+        var count = 0
+        for url in selection {
+            var isDir: ObjCBool = false
+            FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+            if isDir.boolValue {
+                count += 1
+                if let e = FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil) {
+                    while let _ = e.nextObject() { count += 1 }
+                }
+            } else {
+                count += 1
+            }
+        }
+        deleteItemCount = count
+        showDeleteConfirm = true
+    }
+
+    private func itemWord(_ n: Int) -> String {
+        let mod10 = n % 10, mod100 = n % 100
+        if mod100 >= 11 && mod100 <= 14 { return "объектов" }
+        switch mod10 {
+        case 1:  return "объект"
+        case 2, 3, 4: return "объекта"
+        default: return "объектов"
+        }
+    }
+
+    private func selectAll() {
+        guard let children = root?.children else { return }
+        selection = Set(children.map { $0.url })
+    }
+
+    private func deleteSelected() {
+        for url in selection {
+            try? FileManager.default.removeItem(at: url)
+        }
+        selection = []
+        reload()
     }
 
     // MARK: – Loading

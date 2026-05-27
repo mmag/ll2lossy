@@ -3,29 +3,65 @@ import SwiftUI
 struct ProgressDrawerView: View {
     @ObservedObject var engine: TranscodeEngine
 
+    private var doneCount:  Int { engine.tasks.filter { $0.status == .done }.count }
+    private var errorCount: Int { engine.tasks.filter { $0.status == .error }.count }
+    private var total:      Int { engine.tasks.count }
+
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Задачи конвертации")
-                    .font(.headline)
-                    .padding(.leading, 8)
-                Spacer()
+            // Header
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Text("Конвертация")
+                            .font(.headline)
+                        Spacer()
+                        if total > 0 {
+                            Text("\(doneCount) из \(total) файлов")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("·")
+                                .foregroundStyle(.tertiary)
+                            Text("\(Int(engine.overallProgress * 100))%")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if total > 0 {
+                        ProgressView(value: engine.overallProgress)
+                            .progressViewStyle(.linear)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+
                 if engine.isRunning {
-                    Button("Отменить все", role: .destructive) {
-                        engine.cancelAll()
-                    }
-                    .buttonStyle(.borderless)
-                    .padding(.trailing, 8)
+                    Button("Отменить все", role: .destructive) { engine.cancelAll() }
+                        .buttonStyle(.borderless)
+                        .fixedSize()
                 } else if !engine.tasks.isEmpty {
-                    Button("Очистить") {
-                        engine.clearCompleted()
-                    }
-                    .buttonStyle(.borderless)
-                    .padding(.trailing, 8)
+                    Button("Очистить") { engine.clearCompleted() }
+                        .buttonStyle(.borderless)
+                        .fixedSize()
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             .background(Color(NSColor.windowBackgroundColor))
+
+            if errorCount > 0 {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                    Text("Ошибок: \(errorCount)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.orange.opacity(0.07))
+            }
 
             Divider()
 

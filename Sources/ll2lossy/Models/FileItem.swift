@@ -11,7 +11,7 @@ private struct EntryInfo: Sendable {
 
 private func scanLevel(at url: URL, losslessOnly: Bool) -> [EntryInfo] {
     let losslessExts: Set<String> = [
-        "flac", "wav", "wave", "aiff", "aif", "alac", "ape", "wv", "wma", "dsf", "dff", "m4a"
+        "flac", "wav", "wave", "aiff", "aif", "alac", "ape", "wv", "wma", "dsf", "dff", "m4a", "mp3"
     ]
     guard let contents = try? FileManager.default.contentsOfDirectory(
         at: url,
@@ -53,7 +53,7 @@ final class FileItem: Identifiable, ObservableObject {
     static let losslessExtensions: Set<String> = [
         "flac", "wav", "wave", "aiff", "aif", "alac", "ape", "wv", "wma", "dsf", "dff"
     ]
-    static let audioExtensions: Set<String> = losslessExtensions.union(["m4a"])
+    static let audioExtensions: Set<String> = losslessExtensions.union(["m4a", "mp3"])
 
     init(url: URL) {
         self.url = url
@@ -109,7 +109,7 @@ final class FileItem: Identifiable, ObservableObject {
 /// Free function — no actor isolation, safe to call from background tasks.
 func collectLosslessURLs(from url: URL) -> [URL] {
     let extensions: Set<String> = [
-        "flac", "wav", "wave", "aiff", "aif", "alac", "ape", "wv", "wma", "dsf", "dff", "m4a"
+        "flac", "wav", "wave", "aiff", "aif", "alac", "ape", "wv", "wma", "dsf", "dff", "m4a", "mp3"
     ]
     var isDir: ObjCBool = false
     FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)

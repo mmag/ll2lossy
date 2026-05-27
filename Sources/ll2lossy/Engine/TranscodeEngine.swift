@@ -1,12 +1,15 @@
 import Foundation
+import Combine
 
 @MainActor
 final class TranscodeEngine: ObservableObject {
     @Published private(set) var tasks: [TranscodeTask] = []
     @Published private(set) var isRunning = false
+    @Published private(set) var overallProgress: Double = 0
 
     private var processes: [UUID: Process] = [:]
     private var runningJob: Task<Void, Never>?
+    private var cancellables = Set<AnyCancellable>()
 
     // MARK: – Public API
 
@@ -15,6 +18,7 @@ final class TranscodeEngine: ObservableObject {
                                   destinationRoot: destinationRoot, settings: settings)
         guard !newTasks.isEmpty else { return }
         tasks.append(contentsOf: newTasks)
+        newTasks.forEach { subscribeToTask($0) }
 
         isRunning = true
         let parallelism = settings.parallelTasks
@@ -30,6 +34,7 @@ final class TranscodeEngine: ObservableObject {
         tasks.filter { $0.status == .running || $0.status == .pending }
             .forEach { $0.setStatus(.cancelled) }
         isRunning = false
+        updateProgress()
     }
 
     func cancel(id: UUID) {
@@ -38,6 +43,29 @@ final class TranscodeEngine: ObservableObject {
 
     func clearCompleted() {
         tasks.removeAll { $0.status != .running && $0.status != .pending }
+        cancellables.removeAll()
+        tasks.forEach { subscribeToTask($0) }
+        updateProgress()
+    }
+
+    // MARK: – Overall progress
+
+    private func subscribeToTask(_ task: TranscodeTask) {
+        Publishers.Merge(
+            task.$progress.map { _ in () },
+            task.$status.map  { _ in () }
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] in self?.updateProgress() }
+        .store(in: &cancellables)
+    }
+
+    private func updateProgress() {
+        guard !tasks.isEmpty else { overallProgress = 0; return }
+        let total   = Double(tasks.count)
+        let done    = tasks.filter { $0.status == .done || $0.status == .error || $0.status == .cancelled }.count
+        let running = tasks.filter { $0.status == .running }.reduce(0.0) { $0 + $1.progress }
+        overallProgress = (Double(done) + running) / total
     }
 
     // MARK: – Task building
@@ -99,11 +127,6 @@ final class TranscodeEngine: ObservableObject {
     }
 
     private func runOne(_ task: TranscodeTask, settings: AppSettings) async {
-        guard let ffmpeg = FFmpegLocator.locate() else {
-            task.setError("ffmpeg не найден. Запустите ./setup.sh")
-            return
-        }
-
         let destExists = FileManager.default.fileExists(atPath: task.destinationURL.path)
         if destExists {
             switch settings.onConflict {
@@ -117,6 +140,23 @@ final class TranscodeEngine: ObservableObject {
             at: task.destinationURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
+
+        if task.sourceURL.pathExtension.lowercased() == "mp3" {
+            task.setStatus(.running)
+            do {
+                try FileManager.default.copyItem(at: task.sourceURL, to: task.destinationURL)
+                task.setProgress(1.0)
+                task.setStatus(.done)
+            } catch {
+                task.setError(error.localizedDescription)
+            }
+            return
+        }
+
+        guard let ffmpeg = FFmpegLocator.locate() else {
+            task.setError("ffmpeg не найден. Запустите ./setup.sh")
+            return
+        }
 
         // Build arguments: use -progress pipe:1 for progress, stderr for duration
         var args: [String] = ["-hide_banner", "-i", task.sourceURL.path, "-y",
