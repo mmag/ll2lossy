@@ -52,7 +52,7 @@ struct FileBrowserView: View {
                 }
                 .buttonStyle(.borderless)
                 .controlSize(.small)
-                .disabled(playableSelection == nil)
+                .disabled(playbackDisabled)
                 .help(playbackHelp)
 
                 Button { reload() } label: {
@@ -196,16 +196,31 @@ struct FileBrowserView: View {
     }
 
     private var playbackIcon: String {
-        guard let url = playableSelection else { return "play.circle" }
-        return previewPlayer.isPlaying(url: url) ? "pause.circle.fill" : "play.circle.fill"
+        if previewPlayer.isPlaying { return "pause.circle.fill" }
+        if playableSelection != nil || previewPlayer.currentURL != nil { return "play.circle.fill" }
+        return "play.circle"
     }
 
     private var playbackHelp: String {
+        if previewPlayer.isPlaying, let url = previewPlayer.currentURL {
+            return "Пауза: \(url.lastPathComponent)"
+        }
+        if playableSelection == nil, let url = previewPlayer.currentURL {
+            return "Продолжить: \(url.lastPathComponent)"
+        }
         guard let url = playableSelection else { return "Выберите один аудиофайл" }
-        return previewPlayer.isPlaying(url: url) ? "Пауза" : "Воспроизвести \(url.lastPathComponent)"
+        return "Воспроизвести \(url.lastPathComponent)"
+    }
+
+    private var playbackDisabled: Bool {
+        playableSelection == nil && previewPlayer.currentURL == nil
     }
 
     private func togglePlayback() {
+        if playableSelection == nil {
+            previewPlayer.toggleCurrent()
+            return
+        }
         guard let url = playableSelection else { return }
         previewPlayer.toggle(url: url)
     }

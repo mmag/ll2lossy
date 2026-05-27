@@ -17,6 +17,11 @@ final class AudioPreviewPlayer: ObservableObject {
         }
     }
 
+    func toggleCurrent() {
+        guard currentURL != nil else { return }
+        isPlaying ? pause() : resume()
+    }
+
     func isPlaying(url: URL) -> Bool {
         currentURL == url && isPlaying
     }
