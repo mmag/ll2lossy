@@ -21,23 +21,25 @@ macOS-приложение для пакетной конвертации lossle
 ## Требования
 
 - macOS 14 Sonoma или новее
-- Xcode 15+ / Swift 5.9+
-- ffmpeg (устанавливается через `setup.sh`)
+- ffmpeg
 
 ## Установка
 
+**Через Homebrew (рекомендуется):**
+
 ```bash
-# 1. Установите ffmpeg через Homebrew (если ещё нет)
 brew install ffmpeg
-
-# 2. Скопируйте бинарник в Application Support
-./setup.sh
-
-# 3. Соберите и запустите
-swift run
+brew tap mmag/tap
+brew install --cask ll2lossy
 ```
 
-`setup.sh` копирует ffmpeg из Homebrew в `~/Library/Application Support/ll2lossy/ffmpeg`. Приложение использует именно этот путь — системный ffmpeg не трогается.
+**Из исходников:**
+
+```bash
+brew install ffmpeg
+./setup.sh      # копирует ffmpeg в ~/Library/Application Support/ll2lossy/ffmpeg
+swift run
+```
 
 ## Использование
 
