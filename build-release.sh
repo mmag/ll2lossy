@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="0.1"
+VERSION="0.1.1"
 APP_NAME="LosslessToMP3"
 BINARY_NAME="ll2lossy"
 BUILD_DIR=".build/release"
