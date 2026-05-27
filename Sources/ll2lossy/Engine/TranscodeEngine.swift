@@ -5,6 +5,7 @@ import Combine
 final class TranscodeEngine: ObservableObject {
     @Published private(set) var tasks: [TranscodeTask] = []
     @Published private(set) var isRunning = false
+    @Published private(set) var isStopping = false
     @Published private(set) var overallProgress: Double = 0
 
     private var processes: [UUID: Process] = [:]
@@ -21,11 +22,23 @@ final class TranscodeEngine: ObservableObject {
         newTasks.forEach { subscribeToTask($0) }
 
         isRunning = true
+        isStopping = false
         let parallelism = settings.parallelTasks
         runningJob = Task { [weak self] in
             await self?.runAll(newTasks, parallelism: parallelism, settings: settings)
-            await MainActor.run { self?.isRunning = false }
+            await MainActor.run {
+                self?.isRunning = false
+                self?.isStopping = false
+            }
         }
+    }
+
+    func stopAfterCurrentBatch() {
+        guard isRunning else { return }
+        isStopping = true
+        tasks.filter { $0.status == .pending }
+            .forEach { $0.setStatus(.cancelled) }
+        updateProgress()
     }
 
     func cancelAll() {
@@ -34,6 +47,7 @@ final class TranscodeEngine: ObservableObject {
         tasks.filter { $0.status == .running || $0.status == .pending }
             .forEach { $0.setStatus(.cancelled) }
         isRunning = false
+        isStopping = false
         updateProgress()
     }
 
@@ -114,16 +128,30 @@ final class TranscodeEngine: ObservableObject {
         await withTaskGroup(of: Void.self) { group in
             var iter    = allTasks.makeIterator()
             var running = 0
-            while running < parallelism, let task = iter.next() {
+            while running < parallelism, let task = nextRunnableTask(from: &iter) {
                 group.addTask { await self.runOne(task, settings: settings) }
                 running += 1
             }
             for await _ in group {
-                if let task = iter.next() {
+                guard !shouldStopScheduling else { continue }
+                if let task = nextRunnableTask(from: &iter) {
                     group.addTask { await self.runOne(task, settings: settings) }
                 }
             }
         }
+    }
+
+    private var shouldStopScheduling: Bool {
+        isStopping || Task.isCancelled
+    }
+
+    private func nextRunnableTask(from iter: inout IndexingIterator<[TranscodeTask]>) -> TranscodeTask? {
+        guard !shouldStopScheduling else { return nil }
+        while let task = iter.next() {
+            if task.status == .pending { return task }
+            if shouldStopScheduling { return nil }
+        }
+        return nil
     }
 
     private func runOne(_ task: TranscodeTask, settings: AppSettings) async {

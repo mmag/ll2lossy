@@ -35,19 +35,40 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button(action: convertSelected) {
-                Label("Конвертировать", systemImage: "arrow.right.circle.fill")
+            Button(action: primaryCommand) {
+                Label(primaryCommandTitle, systemImage: primaryCommandIcon)
                     .font(.system(size: 13, weight: .semibold))
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(!canConvert)
+            .tint(engine.isRunning ? Color(red: 0.82, green: 0.20, blue: 0.16) : Color.accentColor)
+            .disabled(primaryCommandDisabled)
             .keyboardShortcut(.return, modifiers: .command)
-            .help("Конвертировать выбранное (⌘↩)")
+            .help(primaryCommandHelp)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .background(.regularMaterial)
+    }
+
+    private var primaryCommandTitle: String {
+        if engine.isStopping { return "Прерывается" }
+        return engine.isRunning ? "Прервать" : "Конвертировать"
+    }
+
+    private var primaryCommandIcon: String {
+        if engine.isStopping { return "hourglass" }
+        return engine.isRunning ? "pause.circle.fill" : "arrow.right.circle.fill"
+    }
+
+    private var primaryCommandDisabled: Bool {
+        engine.isRunning ? engine.isStopping : !canConvert
+    }
+
+    private var primaryCommandHelp: String {
+        engine.isRunning
+            ? "Остановить очередь после текущей партии файлов"
+            : "Конвертировать выбранное (⌘↩)"
     }
 
     private var statusBar: some View {
@@ -210,6 +231,14 @@ struct ContentView: View {
     }
 
     // MARK: – Actions
+
+    private func primaryCommand() {
+        if engine.isRunning {
+            engine.stopAfterCurrentBatch()
+        } else {
+            convertSelected()
+        }
+    }
 
     private func convertSelected() {
         guard FFmpegLocator.locate() != nil else { ffmpegMissing = true; return }

@@ -30,11 +30,14 @@ struct ProgressDrawerView: View {
                 .frame(maxWidth: .infinity)
 
                 if engine.isRunning {
-                    Button(role: .destructive) { engine.cancelAll() } label: {
-                        Label("Отменить все", systemImage: "xmark.circle")
+                    Button { engine.stopAfterCurrentBatch() } label: {
+                        Label(engine.isStopping ? "Прерывается" : "Прервать",
+                              systemImage: "pause.circle")
                     }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
+                    .disabled(engine.isStopping)
+                    .help("Остановить очередь после текущей партии файлов")
                     .fixedSize()
                 } else if !engine.tasks.isEmpty {
                     Button { engine.clearCompleted() } label: {
