@@ -7,7 +7,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "ll2lossy",
-            path: "Sources/ll2lossy"
+            path: "Sources/ll2lossy",
+            resources: [
+                .process("Resources")
+            ]
         )
     ]
 )
